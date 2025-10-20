@@ -1,32 +1,45 @@
+// --- Start of functions/controllers/identityController.js ---
 const admin = require('firebase-admin');
-const db = admin.firestore();
+const User = require('../models/User'); // Import User Schema
 const { generateSuperIDHash } = require('../utils/security/hashUtils');
 
-// 1. Identity Creation (The most critical function)
+// 1. Identity Creation (The Register Function)
 exports.registerIdentity = async (req, res) => {
     try {
-        const { fingerprintHash, irisHash, facialHash, voiceHash, behavioralPattern, cnicShards } = req.body;
+        // Required 5-Layer Biometric Hashes and CNIC Shards
+        const { 
+            fingerprintHash, irisHash, facialHash, 
+            voiceHash, behavioralPattern, cnicShards 
+        } = req.body;
         
         // --- Step 1: Generate Super ID Hash ---
+        // Using the first CNIC shard as part of the unique salt for hashing
         const uniqueSalt = cnicShards[0]; 
 
         const biometricData = { fingerprintHash, irisHash, facialHash, voiceHash, behavioralPattern };
         const superIDHash = generateSuperIDHash(biometricData, uniqueSalt);
 
-        // --- Step 2: Save to Firestore (The Federated Super ID Ledger) ---
-        const newUserRecord = {
+        // --- Step 2: Save to Database (Check for existing ID) ---
+        const existingUser = await User.findOne({ superID: superIDHash });
+        if (existingUser) {
+            return res.status(409).json({ 
+                status: 'Error', 
+                message: 'ADANiD Super ID already exists. Identity is unique.' 
+            });
+        }
+
+        // --- Step 3: Create New User Record ---
+        const newUser = new User({
             superID: superIDHash,
             biometricHashes: biometricData,
             cnicShards: cnicShards,
-            status: 'ACTIVE',
-            createdAt: admin.firestore.FieldValue.serverTimestamp()
-        };
+        });
 
-        await db.collection('adanid_users').doc(superIDHash).set(newUserRecord);
+        await newUser.save();
 
         return res.status(201).json({
             status: 'Success',
-            message: 'ADANiD Super ID successfully registered.',
+            message: 'ADANiD Super ID successfully registered under Genesis Protocol.',
             adanid_super_id: superIDHash,
         });
 
@@ -36,17 +49,13 @@ exports.registerIdentity = async (req, res) => {
     }
 };
 
-// 2. Identity Verification (Placeholder)
+// 2. Identity Verification (To be completed next)
 exports.verifyIdentity = async (req, res) => {
     return res.status(501).json({ status: 'Pending', message: 'Verification logic under construction.' });
 };
 
-// 3. Status Check (CAP)
-exports.checkStatus = async (req, res) => {
-    return res.status(501).json({ status: 'Pending', message: 'CAP Status Check logic under construction.' });
-};
+// (Other functions remain placeholders for now)
+exports.checkStatus = (req, res) => res.status(501).json({ status: 'Pending' });
+exports.lockSession = (req, res) => res.status(501).json({ status: 'Pending' });
 
-// 4. Atomic Lock
-exports.lockSession = async (req, res) => {
-    return res.status(501).json({ status: 'Pending', message: 'Atomic Lock logic under construction.' });
-};
+// --- End of functions/controllers/identityController.js ---
