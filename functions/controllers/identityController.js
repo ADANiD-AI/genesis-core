@@ -6,20 +6,18 @@ const { generateSuperIDHash } = require('../utils/security/hashUtils');
 // 1. Identity Creation (The Register Function)
 exports.registerIdentity = async (req, res) => {
     try {
-        // Required 5-Layer Biometric Hashes and CNIC Shards
         const { 
             fingerprintHash, irisHash, facialHash, 
             voiceHash, behavioralPattern, cnicShards 
         } = req.body;
         
         // --- Step 1: Generate Super ID Hash ---
-        // Using the first CNIC shard as part of the unique salt for hashing
         const uniqueSalt = cnicShards[0]; 
 
         const biometricData = { fingerprintHash, irisHash, facialHash, voiceHash, behavioralPattern };
         const superIDHash = generateSuperIDHash(biometricData, uniqueSalt);
 
-        // --- Step 2: Save to Database (Check for existing ID) ---
+        // --- Step 2: Check for existing ID using Mongoose ---
         const existingUser = await User.findOne({ superID: superIDHash });
         if (existingUser) {
             return res.status(409).json({ 
@@ -28,7 +26,7 @@ exports.registerIdentity = async (req, res) => {
             });
         }
 
-        // --- Step 3: Create New User Record ---
+        // --- Step 3: Create and Save New User Record ---
         const newUser = new User({
             superID: superIDHash,
             biometricHashes: biometricData,
@@ -49,12 +47,8 @@ exports.registerIdentity = async (req, res) => {
     }
 };
 
-// 2. Identity Verification (To be completed next)
-exports.verifyIdentity = async (req, res) => {
-    return res.status(501).json({ status: 'Pending', message: 'Verification logic under construction.' });
-};
-
 // (Other functions remain placeholders for now)
+exports.verifyIdentity = (req, res) => res.status(501).json({ status: 'Pending', message: 'Verification logic under construction.' });
 exports.checkStatus = (req, res) => res.status(501).json({ status: 'Pending' });
 exports.lockSession = (req, res) => res.status(501).json({ status: 'Pending' });
 
