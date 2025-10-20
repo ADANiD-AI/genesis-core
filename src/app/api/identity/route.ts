@@ -1,12 +1,8 @@
-// The user wants to create an API for identity.
-// In Next.js, this is done with Route Handlers.
-// This file will serve as the entry point for the /api/identity route.
-
 import { NextResponse } from 'next/server';
+import { handleRegistration, handleLogin } from '@/lib/controllers/identityController';
 
 // This function will handle GET requests to /api/identity
 export async function GET(request: Request) {
-  // Placeholder for any logic from identityRoutes.js
   return NextResponse.json({ message: "Hello from the identity API!" });
 }
 
@@ -14,10 +10,21 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    // Placeholder for logic to handle user data, e.g., from a registration form
-    console.log("Received data:", body);
-    return NextResponse.json({ message: "Data received successfully", data: body });
+    const { action, data } = body;
+
+    if (action === 'register') {
+      const result = await handleRegistration(data);
+      return NextResponse.json(result);
+    }
+
+    if (action === 'login') {
+      const result = await handleLogin(data);
+      return NextResponse.json(result);
+    }
+    
+    return NextResponse.json({ message: "Invalid action." }, { status: 400 });
+
   } catch (error) {
-    return NextResponse.json({ message: "Error parsing JSON body" }, { status: 400 });
+    return NextResponse.json({ message: "Error processing request." }, { status: 500 });
   }
 }
