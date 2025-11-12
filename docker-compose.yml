@@ -1,0 +1,208 @@
+version: '3.9'
+
+services:
+  # API Gateway Service
+  api-gateway:
+    image: kong:latest
+    container_name: adan-api-gateway
+    environment:
+      KONG_DATABASE: postgres
+      KONG_PG_HOST: postgres
+      KONG_PG_USER: kong
+      KONG_PG_PASSWORD: ${KONG_PG_PASSWORD:-kong}
+      KONG_PROXY_ACCESS_LOG: /dev/stdout
+      KONG_ADMIN_ACCESS_LOG: /dev/stdout
+      KONG_PROXY_ERROR_LOG: /dev/stderr
+      KONG_ADMIN_ERROR_LOG: /dev/stderr
+      KONG_ADMIN_LISTEN: 0.0.0.0:8001
+    ports:
+      - "8000:8000"  # Proxy
+      - "8443:8443"  # Proxy SSL
+      - "8001:8001"  # Admin API
+      - "8444:8444"  # Admin API SSL
+    depends_on:
+      - postgres
+    networks:
+      - adan-network
+    healthcheck:
+      test: ["CMD", "kong", "health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: adan-postgres
+    environment:
+      POSTGRES_USER: kong
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-kong}
+      POSTGRES_DB: kong
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - adan-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kong"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Prometheus Monitoring
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: adan-prometheus
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+    ports:
+      - "9090:9090"
+    networks:
+      - adan-network
+    depends_on:
+      - api-gateway
+
+  # Grafana Visualization
+  grafana:
+    image: grafana/grafana:latest
+    container_name: adan-grafana
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_INSTALL_PLUGINS: grafana-piechart-panel
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning
+    ports:
+      - "3000:3000"
+    networks:
+      - adan-network
+    depends_on:
+      - prometheus
+
+  # Elasticsearch for Logging
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.0.0
+    container_name: adan-elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    ports:
+      - "9200:9200"
+    networks:
+      - adan-network
+
+  # Kibana for Log Visualization
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.0.0
+    container_name: adan-kibana
+    environment:
+      ELASTICSEARCH_HOSTS: http://elasticsearch:9200
+    ports:
+      - "5601:5601"
+    networks:
+      - adan-network
+    depends_on:
+      - elasticsearch
+
+  # Logstash for Log Processing
+  logstash:
+    image: docker.elastic.co/logstash/logstash:8.0.0
+    container_name: adan-logstash
+    volumes:
+      - ./monitoring/logstash/pipeline:/usr/share/logstash/pipeline
+    environment:
+      - "LS_JAVA_OPTS=-Xmx256m -Xms256m"
+    ports:
+      - "5000:5000"
+    networks:
+      - adan-network
+    depends_on:
+      - elasticsearch
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: adan-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - adan-network
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ADAN iD Authentication Service
+  auth-service:
+    build:
+      context: ./services/auth-service
+      dockerfile: Dockerfile
+    container_name: adan-auth-service
+    environment:
+      DATABASE_URL: postgresql://kong:${POSTGRES_PASSWORD:-kong}@postgres:5432/kong
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET:-your-secret-key}
+    ports:
+      - "3001:3001"
+    networks:
+      - adan-network
+    depends_on:
+      - postgres
+      - redis
+
+  # ADAN iD User Service
+  user-service:
+    build:
+      context: ./services/user-service
+      dockerfile: Dockerfile
+    container_name: adan-user-service
+    environment:
+      DATABASE_URL: postgresql://kong:${POSTGRES_PASSWORD:-kong}@postgres:5432/kong
+      REDIS_URL: redis://redis:6379
+    ports:
+      - "3002:3002"
+    networks:
+      - adan-network
+    depends_on:
+      - postgres
+      - redis
+
+  # ADAN iD Compliance Service
+  compliance-service:
+    build:
+      context: ./services/compliance-service
+      dockerfile: Dockerfile
+    container_name: adan-compliance-service
+    environment:
+      DATABASE_URL: postgresql://kong:${POSTGRES_PASSWORD:-kong}@postgres:5432/kong
+      REDIS_URL: redis://redis:6379
+    ports:
+      - "3003:3003"
+    networks:
+      - adan-network
+    depends_on:
+      - postgres
+      - redis
+
+networks:
+  adan-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  prometheus_data:
+  grafana_data:
+  elasticsearch_data:
+  redis_data:
